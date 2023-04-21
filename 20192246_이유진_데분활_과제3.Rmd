@@ -1,0 +1,285 @@
+---
+title: "Assignment3"
+author: "20192246 이유진"
+date: "2023-04-14"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 10
+    highlight: pygments
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 문제1
+___
+
+```{r message=FALSE}
+# 필요 라이브러리 불러오기
+library(caret)
+library(ggplot2)
+library(corrgram)
+library(corrplot)
+library(rsample)
+library(leaps)
+library(glmnet)
+```
+
+```{r}
+# 데이터 불러오기
+data <- read.csv('C:/Users/이유진/Downloads/ClimateChange.csv')
+head(data)
+```
+
+
+### (1)
+
+```{r}
+# Year, Month 컬럼 제거
+data1 <- data[,-c(1,2)]
+
+# 상관계수 출력
+cor(data1)
+```
+- 다음과 같이 변수 간 상관계수를 출력할 수 있다.
+
+```{r}
+# 그래프 시각화
+corrgram(cor(data1))
+```
+
+- 변수 간 상관관계를 시각화한 결과는 다음과 같다. 파란색은 양의 상관관계, 붉은색은 음의 상관관계를 나타내며 CH4와 N2O 처럼 특히 색이 진한 부분은 강한 상관관계가 있다고 해석할 수 있다.
+
+```{r}
+# 그래프 시각화
+corrplot(cor(data1), method="number")
+```
+
+- 이를 수치값으로 나타낸 그래프는 다음과 같다. 그 중 CO2와 N2O 변수 간 상관 계수는 0.98로 매우 강한 양의 상관관계를 가진다는 것을 알 수 있다. 또한 Aerosols 변수는 수치가 음수로 대부분의 변수와 음의 상관관계를 가진다는 것을 알 수 있다.
+
+### (2)
+```{r}
+# 데이터 split (train : 1983~2003, test : 2004~2008)
+train <- data[data$Year <= 2003, ]
+test <- data[data$Year > 2003, ]
+```
+
+- 다음과 같이 연도를 기준으로 train/test set을 분리한다.
+
+```{r}
+# year, month 변수 삭제
+train <- train[,-c(1,2)]
+test <- test[,-c(1,2)]
+```
+
+- train과 test 데이터셋에서 예측에 활용되지 않는 Year, Month 변수를 제거한다.
+
+```{r}
+# linear regression model 수립
+model1 <- lm(Temp ~ ., data = train)
+summary(model1)
+```
+#### a) 어떠한 feature들이 Temp에 큰 영향을 미치는가?
+- p-value가 0.05보다 작은 변수들 중 coefficient 값이 큰 Aerosols, TSI, MEI, N2O 변수들이 Temp에 큰 영향을 미친다고 볼 수 있다.
+
+#### B) N2O와 CFC-11 변수의 coefficient
+- N2O 변수의 coefficient는 -2.525e-02, CFC-11 변수의 coefficient는 -7.666e-03로 음수이다. 이러한 모순될 결과가 도출된 원인에는 여러 가지 이유가 있겠지만, 그 중 하나는 **다중공선성** 문제가 포함될 수 있다. 1번 문제에서 밝힌 바와 같이 CO2와 N2O 변수 간 상관 계수는 0.98로 매우 강한 양의 상관관계를 가진다. 이처럼 해당 변수가 다른 변수들과 강한 상관관계를 갖고 있어 다중공선성이 발생해 coefficient 값이 부정확하게 추정되었을 수 있다.
+
+
+### (3)
+
+```{r}
+# 4개의 feature 사용하여 regression model
+model2 <- lm(Temp ~ MEI + TSI + Aerosols + N2O, data = train)
+summary(model2)
+```
+
+```{r}
+# test set에 대한 RMSE 비교
+set.seed(1)
+model1_pred <- predict(model1, test)
+RMSE(model1_pred, test$Temp)
+
+model2_pred <- predict(model2, test)
+RMSE(model2_pred, test$Temp)
+```
+
+#### a)
+- 4개의 변수를 사용한 결과, N2O의 coefficient는 2.524e-02으로 양수값이 나온 것을 확인할 수 있다. 변수 선택을 통해 다중공선성을 제거한 결과, 음에서 양으로 값이 올바르게 도출되었다.
+
+#### b)
+- model1 : R^2 = 0.7133, Adjusted R-squared = 0.7037, RMSE = 0.08439069
+- model2 : R^2 = 0.6799, Adjusted R-squared = 0.6747, RMSE = 0.08501107
+- model1의 R^2 Adjusted R^2 값이 더 높게 나온 것을 확인할 수 있다. 이는 model1의 feature 개수가 model2 보다 많기 때문에 도출된 결과이다. 모델을 평가할 때는 여러 가지 평가 지표를 비교해보아야 하지만 변수의 개수를 줄였을 때 비슷한 성능을 보이는 것으로 보아 model2가 더 좋은 모델이라고 할 수 있다. 
+
+
+### (4)
+
+```{r}
+# 8개의 feature 대상으로 cv를 활용한 stepwise variable selection
+
+# forward selection
+train.control <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+fwd_model <- train(Temp ~., data = train, method = "leapForward", tuneGrid = data.frame(nvmax = 1:8), trControl = train.control)
+fwd_model
+
+test_pred_fwd_cv <- predict(fwd_model, test)
+RMSE(test_pred_fwd_cv, test$Temp)
+```
+
+```{r}
+# backward selection
+bwd_model <- train(Temp ~., data = train, method = "leapBackward", tuneGrid = data.frame(nvmax = 1:8), trControl = train.control)
+bwd_model
+
+test_pred_bwd_cv <- predict(bwd_model, test)
+RMSE(test_pred_bwd_cv, test$Temp)
+```
+
+#### (a)
+- 두 모델 모두 7개의 변수를 선택하였다.
+
+#### (b)
+- test set의 RMSE값을 비교한 결과, forward selection = 0.08359067,  backward selection = 0.08359067으로 값이 동일하게 산출되었다. train set의 RMSE 값이 더 작은 forward selection 모델을 선택한다.
+
+
+### (5)
+
+
+```{r}
+# interaction effect 고려한 model stepwise variable selection
+# forward selection
+set.seed(1)
+inter_fwd_model <- train(Temp ~ .^2 +
+                           I(CO2^2) +
+                           I(CFC.11^2) +
+                           I(CFC.12^2),
+                         data = train, method = "leapForward", tuneGrid = data.frame(nvmax = 1:20), trControl = train.control)
+ggplot(inter_fwd_model, aes(x = nvmaxl, y = RMSE)) + geom_point() + geom_line() + theme_bw()
+inter_fwd_model
+coef(inter_fwd_model$finalModel, inter_fwd_model$bestTune$nvmax)
+```
+
+```{r}
+## Backward selection
+inter_bwd_model <- train(Temp ~ .^2 +
+                           I(CO2^2) +
+                           I(CFC.11^2) +
+                           I(CFC.12^2),
+                         data = train, method = "leapForward", tuneGrid = data.frame(nvmax = 1:20), trControl = train.control)
+ggplot(inter_bwd_model, aes(x = nvmaxl, y = RMSE)) + geom_point() + geom_line() + theme_bw()
+inter_bwd_model
+coef(inter_bwd_model$finalModel, inter_bwd_model$bestTune$nvmax)
+```
+```{r}
+# forward selection RMSE
+inter_fwd_model_cv <- predict(inter_fwd_model, test)
+RMSE(inter_fwd_model_cv, test$Temp)
+```
+
+#### (a)
+- forward 모델은 13개의 변수를, backward 모델은 14개의 모델을 선택하였다. 
+
+#### (b)
+- forward 모델의 cv RMSE는 0.08510804, backward 모델의 cv RMSE는 0.08532326이다. 따라서 값이 더 낮은 forward 모델을 best 모델로 선택한다. 모델에 포함된 변수는 TSI, I(CO2^2), I(CFC.12^2), MEI:CO2, MEI:CFC.11, CO2:CFC.12, CO2:TSI, CO2:Aerosols, CH4:Aerosols, N2O:CFC.11, CFC.11:CFC.12, CFC.11:Aerosols, CFC.12:Aerosols 로 총 13개이다.
+
+
+### (6)
+- 2번 모델 : 0.08439069
+- 3번 모델 : 0.08501107
+- 4번 모델 : 0.08359067
+- 5번 모델 : 0.09242062
+- test set의 RMSE 값을 비교한 결과, 예상과는 다르게 8개의 feature들로 cv stepwise variable selection 수행한 3번 모델의 값이 가장 낮게 나왔다. 그 원인으로는 상호작용항으로 고려한 4번 모델에서 과적합이 발생해 낮은 train set RMSE와는 달리 test set에서는 결과가 좋지 않게 나왔을 것이라 예상된다.
+
+<br>
+
+## 문제2
+___
+
+**데이터 생성**
+```{r}
+# X 생성
+set.seed(1)
+X <- rnorm(100, mean = 0, sd = 1)
+
+# e 생성
+set.seed(2)
+e <- rnorm(100, mean = 0, sd = 4)
+
+# Target vector Y 생성
+Y <- 1 - 2*X + 3*X^2 - 4*X^3 + e
+```
+
+```{r}
+# 데이터프레임 생성
+x_matrix <- matrix(rep(X, 10), ncol=10)
+for (i in 2:10) {
+  x_matrix[, i] <- x_matrix[, i-1] * X
+}
+
+data <- data.frame(y = Y, x1 = x_matrix[,1], x2 = x_matrix[,2], x3 = x_matrix[,3], 
+                   x4 = x_matrix[,4], x5 = x_matrix[,5], x6 = x_matrix[,6], 
+                   x7 = x_matrix[,7], x8 = x_matrix[,8], x9 = x_matrix[,9], 
+                   x10 = x_matrix[,10])
+head(data)
+```
+
+- linear regression에 사용할  Y, X, X^2, X^3, ... X^10 로 구성된 dataframe을 생성한다.
+
+### (1)
+```{r}
+# 시각화
+corr_data <- cor(data)
+
+corrgram(corr_data)
+corrplot(corr_data, method="number")
+```
+
+- 다음과 같이 feature 변수들과 target 변수 간 상관관계를 그래프로 시각화하였다. 다음과 같이 target 변수 y는 홀수 제곱항들에 대해 강한 음의 상관관계를 가진다는 것을 알 수 있다. 
+
+### (2)
+```{r}
+# 10개의 feature를 포함하는 linear regression model
+model1 <- lm(y ~ ., data = data)
+summary(model1)
+```
+
+- 다음과 같이 10개의 feature를 모두 포함하는 linear regression model을 수립하였다. p-value가 0.05보다 작아 통계적으로 유의하다고 판단할 수 있는 변수는 x^3, x^5, x^6, x^7, x^8, x^9, x^10 이다. 추정된 상수항은 1.0098로 실제 값과 매우 비슷하고, X의 계수는 2.1443로 실제값 -2와 부호가 반대이다. 추정된 X^2의 계수는 -0.7539로 실제값 3과는 다소 차이가 있으며 추정된 X^3의 계수는 -23.5636로 실제값 -4와 큰 차이가 있다.
+
+### (3)
+```{r}
+# 3개의 변수를 feature로 사용하여 linear regression model
+
+model2 <- lm(y ~ x1 + x2 + x3, data = data)
+summary(model2)
+```
+
+- 3개의 변수로 linear regression model를 수립한 결과, 모든 변수의 p-value가 0.05 이하로 통계적으로 유의하게 나타났다. 추정된 계수 또한 실제값과 비슷했다. 먼저, 추정된 상수항은 1.5795로 실제 값인 1과 비슷하고, X의 계수는 -2.4347로 실제값 -2와 부호가 같고 값 또한 비슷하게 추정되었다. 추정된 X^2의 계수는 2.2177, 추정된 X^3의 계수는 -4.0992로 실제값과 가까운 것을 확인할 수 있다.
+
+### (4)
+```{r}
+# rasso regression
+
+X <- model.matrix(y~., data)[, -1]
+Y <- data$y
+cv_lasso <- cv.glmnet(x = X, y = Y, alpha = 1, nfolds = 10)
+plot(cv_lasso)
+```
+- 다음과 같이 10 Cross validation을 통해 Lasso regression model을 수립하였다.
+
+
+```{r}
+# coefficient
+coef(cv_lasso)
+```
+- 10 cv를 돌린 Lasso regression model의 결과로 X, X^2, X^3 변수가 포함되었다. regression coefficient는 각각 2.011705, -2.213075, 1.600700, -3.891245로 실제값과 매우 유사한 것을 확인할 수 있다. 이를 통해 Lasso regression은 불필요한 변수를 제거하여 모델을 간결히 만들고, 모델의 복잡성을 줄여 overfitting을 방지하여 예측 성능을 향상시키는 효과가 있다는 것을 알 수 있다. 
+
+
+
