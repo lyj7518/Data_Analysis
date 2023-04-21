@@ -1,0 +1,226 @@
+---
+title: "Assignment2"
+author: "20192246 이유진"
+date: "2023-03-31"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 10
+    highlight: pygments
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 문제1
+___
+**training set과 test set에서의 target variable 분포 비교**
+
+```{r message=FALSE}
+# 필요 라이브러리 불러오기
+library(ggplot2)
+library(class)
+library(caret)
+```
+
+```{r}
+# Common Bank 데이터 불러오기
+data <- read.csv('C:/Users/이유진/Downloads/CommonBank.csv')
+```
+
+```{r}
+# 데이터 전처리
+
+# ID와 ZIP.code 제외
+data <- subset(data, select=-c(ID, ZIP.Code))
+
+# target variable을 factor형으로 바꾸기.
+data$PersonalLoan = factor(data$PersonalLoan)
+
+# z-score normalization 활용하여 scale 일치
+data_n <- as.data.frame(lapply(data[-8], scale))
+head(data_n)
+```
+
+- 전처리 후 데이터셋은 다음과 같다. ID 컬럼과 ZIP.code 컬럼이 제외되었으며 z-score normalization이 적용되었다.
+
+```{r}
+# train/test set split
+train_data <- data_n[1:4000,]
+test_data <- data_n[4001:5000,]
+train_data_labels <- data[1:4000, 8]
+test_data_labels <- data[4001:5000, 8]
+```
+
+- 다음과 같이 4000명의 데이터를 training set으로, 나머지 1000명의 데이터를 test set으로 나누었다.
+
+```{r}
+# 타겟 분포 확인
+table(train_data_labels)
+table(test_data_labels)
+```
+
+- 다음과 같이 타겟 분포를 확인한 결과, **두 데이터셋 모두 대략 9:1 정도의 target variable 분포**를 갖는 것을 알 수 있다.
+
+
+## 문제2
+___
+**7-NN 적용 후 결과 분석**
+
+```{r}
+# 7-NN 적용
+test_data_pred <- knn(train = train_data, test = test_data, cl = train_data_labels, k = 7)
+confusionMatrix(test_data_pred, test_data_labels)
+```
+
+- **Accuracy : 0.962**
+- 7-NN을 적용한 결과, 96.2%의 정확도를 얻을 수 있었다. 또한 민감도 99.56%, 특이도는 59.04%로 비교적 낮게 나타났다.
+ 
+ 
+## 문제3
+___
+
+**800명의 데이터를 validation set으로 사용하여, 다양한 k값에 대해 k-NN 적용 후 예측 성능 비교**
+
+```{r}
+# train/validation set 나누기
+train_data_2 <- train_data[1:3200,]
+val_data <- train_data[3201:4000,]
+
+train_data_labels_2 <- train_data_labels[1:3200]
+val_data_labels <- train_data_labels[3201:4000]
+```
+
+
+```{r, echo=FALSE}
+set.seed(1)
+```
+
+- 다음과 같이 기존의 training set 중 마지막 800개의 데이터를  validation set으로 설정하였다.
+
+<br>
+
+1. k=1
+
+```{r}
+# 1) k=1
+test_data_pred_1 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 1)
+confusionMatrix(test_data_pred_1, val_data_labels)
+```
+- Accuracy : 0.9575
+
+
+<br>
+
+2. k=2
+
+```{r}
+# 2) k=2
+test_data_pred_2 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 2)
+confusionMatrix(test_data_pred_2, val_data_labels)
+```
+- Accuracy : 0.94
+
+<br>
+
+3. k=3
+
+```{r}
+# 3) k=3
+test_data_pred_3 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 3)
+confusionMatrix(test_data_pred_3, val_data_labels)
+```
+- Accuracy : 0.9475
+
+<br>
+
+4. k=4
+
+```{r}
+# 4) k=4
+test_data_pred_4 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 4)
+confusionMatrix(test_data_pred_4, val_data_labels)
+```
+- Accuracy : 0.9488
+
+<br>
+
+5. k=5
+
+```{r}
+# 5) k=5
+test_data_pred_5 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 5)
+confusionMatrix(test_data_pred_5, val_data_labels)
+```
+- Accuracy : 0.9525
+
+<br>
+
+6. k=6
+
+```{r}
+# 6) k=6 (accuracy = 0.9475)
+test_data_pred_6 <- knn(train = train_data_2, test = val_data, cl = train_data_labels_2, k = 6)
+confusionMatrix(test_data_pred_6, val_data_labels)
+```
+- Accuracy : 0.9488
+
+<br>
+
+- 다양한 k에 k-NN을 적용한 결과, **k=1 일 때 accuracy = 0.9575**로 **예측 성능이 가장 우수**한 것을 알 수 있다.
+
+## 문제4
+___
+
+**5-fold cross validation 5회 반복 후 best k 값 찾고 model 성능 report**
+
+```{r, echo=FALSE}
+# train/test data split
+train_data <- data[1:4000,]
+test_data <- data[4001:5000,]
+train_data_labels <- data[1:4000, 8]
+test_data_labels <- data[4001:5000, 8]
+```
+
+```{r}
+# z_score normalization 정의
+z_normalized <- c("center", "scale")
+```
+
+```{r}
+# 5-fold cross validation 학습
+knn_fit <- train(data = train_data, PersonalLoan~., method = "knn", 
+                 trControl = trainControl(method = "repeatedcv", number = 5, repeats = 5), 
+                 preProcess = z_normalized, tuneGrid = expand.grid(k = seq(1, 99, 2)))
+knn_fit
+```
+
+- 5-fold cross validation을 5회 반복한 결과, **best k는 k=3일 때 accuracy = 0.9582014**로 가장 성능이 높을 것을 알 수 있다.
+
+```{r}
+# 다양한 k에 따른 accuracy score 시각화
+ggplot(knn_fit) + theme_bw()
+```
+
+- 다음과 같이 k=3일 때 accuracy가 가장 큰 것을 알 수 있다. 따라서 cross validation을 통해 3-NN을 최종 model로 선택한다.
+
+```{r}
+# 최종 모델 성능 평가
+test_pred <- predict(knn_fit, test_data[,-8])
+confusionMatrix(test_pred, test_data_labels, positive = "1")
+```
+
+- 최종 모델을 test set에 적용한 결과, Accuracy = 0.967의 성능을 보였다. 또한 민감도와 특이도는 각각 65.06%, 99.56%로 나타났다.
+
+## 문제5
+___
+
+**3,4번에서 활용한 training 방식의 장단점 비교**
+
+- 먼저 3번에서 적용한 k-NN training 방식은 원하는 k의 값을 지정하여 그 score를 직관적으로 확인할 수 있다는 장점이 있다. 하지만 일일히 k 값을 설정해야 한다는 단점이 있으며, 4번에서 적용한 cross validation training 방식은 여러 번의 validation 과정을 통해 최적의 k 값을 찾을 수 있어 데이터셋의 크기가 작을 때 유용하다는 장점이 있다.
