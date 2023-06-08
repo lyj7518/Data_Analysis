@@ -1,0 +1,302 @@
+---
+title: "Assignment5"
+author: "20192246 이유진"
+date: "2023-05-18"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 10
+    highlight: pygments
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 문제1
+___
+**data preprocessing 진행**
+
+```{r message=FALSE}
+# 필요 라이브러리 불러오기
+library(dslabs)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+### 1.A 
+```{r}
+# mnist 데이터 불러오기
+mnist <- read_mnist()
+```
+
+### 1.B
+```{r}
+# 처음 2,000개 데이터만 가져오기
+train_x <- mnist$train$images[1:2000, 1:784]
+train_y <- mnist$train$labels[1:2000]
+```
+
+```{r}
+# train_y의 도수분포표 출력
+data_frame <- data.frame(label = factor(train_y))
+table(train_y)
+```
+
+```{r}
+# train_y의 분포 시각화
+ggplot(data_frame, aes(x=label)) + geom_bar() +
+  geom_text(stat = "count", aes(label=..count..), vjust=-0.5)
+```
+
+- 다음과 같이 train_y의 분포를 살펴본 결과, 7과 1의 도수가 가장 높다. 반면 8의 도수 172개로 가장 낮은 것을 확인할 수 있다. 전반적으로 200개에서 약간씩 차이가 나는 것을 알 수 있다.
+
+### 1.C
+```{r}
+# column 이름 설정
+colnames(train_x) <- paste0("V", 1:ncol(train_x))
+print(colnames(train_x)[1])
+print(colnames(train_x)[780])
+```
+
+- 다음과 같이 column 이름을 설정할 수 있다. V1부터 V780까지 column name이 잘 설정된 것을 알 수 있다.
+
+### 1.D
+```{r}
+# nearZeroVar 제외
+zero_var <- nearZeroVar(train_x)
+print(length(zero_var))
+
+train_x <- train_x[, -zero_var]
+```
+
+- variance가 0이거나 0에 가까운 540개의 feature가 제거되었다.
+
+### 1.E
+```{r}
+# dataframe 합치기
+train <- data.frame(train_x, train_y)
+train$train_y <- factor(train$train_y)
+```
+
+### 1.F
+```{r}
+# test set 전처리
+test_x <- mnist$test$images
+test_y <- mnist$test$labels
+
+# colname 변경
+colnames(test_x) <- paste0("V", 1:ncol(test_x))
+
+# nearZeroVar 제외
+test_x <- test_x[, -zero_var]
+
+# dataframe 합치기
+test <- data.frame(test_x, test_y)
+test$test_y <- factor(test$test_y)
+```
+
+- 다음과 같이 test set에 대해서도 train set과 동일한 전처리 과정을 수행하였다.
+
+
+## 문제2
+___
+**숫자 이미지를 출력하는 함수 print_image() 구성 및 이미지 출력**
+
+```{r}
+# 숫자 이미지를 출력 함수 구성
+print_image <- function(num) {
+  image_matrix <- matrix(mnist$test$images[num, ], nrow = 28)[, 28:1]
+  
+  image(1:28, 1:28, image_matrix, col = gray(seq(0, 1, 0.05)), xlab = "", ylab = "")
+}
+```
+
+```{r}
+# 이미지 출력_1
+print_image(42)
+```
+
+- 2와 7로 유추되는 분류가 어려운 이미지
+
+```{r}
+# 이미지 출력_2
+print_image(876)
+```
+
+- 8과 2로 유추되는 분류가 어려운 이미지
+
+```{r}
+# 이미지 출력_3
+print_image(8005)
+```
+
+- 형태가 애매한 분류가 어려운 이미지
+
+
+## 문제3
+___
+**tree 모델 구성**
+
+### 3.A
+```{r}
+# alpha = 0, leaf node의 최소 데이터 = 80인 tree 구성
+set.seed(42)
+ct1 <- rpart(train_y ~., data = train, method = "class", control=list(cp=0, minbucket=80))
+
+# tree 시각화
+rpart.plot(ct1)
+```
+
+- Cost complexity parameter = 0, leaf node가 가지는 최소 데이터의 수가 80인 Tree를 다음과 같이 구성하였다.
+- 시각화 결과, **14개의 leaf node**를 가지며 Tree의 **depth는 5**이다.
+
+### 3.B
+```{r}
+# alpha = 0, max depth = 3인 tree 구성
+set.seed(42)
+ct2 <- rpart(train_y ~., data = train, method = "class", control=list(cp=0, maxdepth=3))
+
+# tree 시각화
+rpart.plot(ct2)
+```
+
+- Cost complexity parameter = 0, depth가 최대 3인 Tree를 다음과 같이 구성하였다.
+- 시각화 결과, **8개의 leaf node**를 가지며 Tree의 depth는 3이다.
+- 우리의 문제는 0~9까지의 숫자를 10개의 class로 분류하는 문제이므로 leaf node가 8개인 tree model를 활용하기는 어려울 것이다.
+
+### 3.C
+```{r}
+# default 옵션으로 Tree 구성
+set.seed(42)
+ct3 <- rpart(train_y ~., data = train, method = "class", control=list(cp=0))
+
+# tree 시각화
+rpart.plot(ct3)
+```
+
+- rpart() 함수의 default 옵션으로 Tree를 구성한 결과, 다음과 같이 leaf node의 수가 굉장히 많은 Tree model이 출력된다.
+
+
+```{r}
+# cv error가 가장 낮을 때의 cp값 저장
+best_cp <- ct3$cptable[which.min(ct3$cptable[, "xerror"]), "CP"]
+print(best_cp)
+
+# best cp 값일 때의 pruned tree 생성
+best_ct <- prune(ct3, cp = best_cp)
+
+# best tree 시각화
+rpart.plot(best_ct)
+```
+
+- cv error가 가장 낮을 때의 cp 값인 0.001876877을 이용해 pruned tree를 생성한 결과, 위와 같은 tree 모델이 출력되었다.
+
+
+### 3.D
+```{r}
+# test set에 대한 예측 수행
+pred_class1 <- predict(best_ct, newdata = test, type = "class")
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_class1), test$test_y)
+```
+
+- test set에 대한 confusion matrix를 계산한 결과, **예측 정확도는 70.65%이다.**
+
+
+## 문제4
+___
+**Random Forest 모델 구성**
+
+### 3.A
+```{r}
+# bagging model 구성
+set.seed(42)
+bag <- randomForest(train_y~., data = train, mtry= ncol(train)-1)
+
+# 그래프 출력
+plot(bag)
+```
+
+- Bagging model을 사용하여 OOB classification error rate를 시각화한 결과, tree의 수가 증가할수록 error가 감소하다가 어느 지점 이후로는 비슷한 error 값을 유지하는 것을 알 수 있다.
+
+### 3.B
+```{r}
+# test set에 대한 예측 수행
+pred_class2 <- predict(bag, newdata = test, type = "class")
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_class2), test$test_y)
+```
+
+- test set에 대한 Bagging model의 confusion matrix를 계산한 결과, **예측 정확도는 89.34%이다.**
+- tree model에 비해서 18.7% 정도 성능이 향상되었다.
+
+### 3.C
+```{r}
+# random forest model 구성
+set.seed(42)
+rf <- randomForest(train_y~., data = train)
+
+# OOB classification error rate 그래프 출력
+plot(bag, col = "darkred")
+plot(rf, col = "darkblue", add = TRUE)
+```
+
+- 전반적으로 빨간색 그래프(Bagging model)가 파란색 그래프(Random Forest model)보다 위에 있음을 알 수 있다.
+- 즉, Bagging model의 OOB classification error가 Random Forest model보다 높은 것을 알 수 있다. 본 그래프로 확인한 결과, Random Forest model의 성능이 더 좋다고 할 수 있다.
+
+### 3.D
+```{r}
+# test set에 대한 예측 수행
+pred_class3 <- predict(rf, newdata = test, type = "class")
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_class3), test$test_y)
+```
+
+- Random forest model의 test set에 대한 예측을 수행한 결과, **예측 정확도는 91.39%이다.**
+- Bagging model에 비해서 2.05% 정도 성능이 향상되었다.
+
+### 3.E
+- D번의 confusion matrix 확인 결과, 1의 Sensitivity와 Specificity, Balanced Accuracy 값이 가장 높았고 8의 Sensitivity와 Balanced Accuracy 값이 가장 낮게 확인되었다.
+- 즉 **분류가 가장 정확한 숫자는 1**, **가장 어려운 숫자는 8**인 것을 알 수 있다.
+
+### 3.F
+```{r}
+# 실제 값은 9지만 0으로 예측되는 test data의 index
+misclassified_indices <- which(test$test_y == 9 & factor(pred_class3) == 0)
+print(misclassified_indices)
+```
+
+- 다음과 같이 실제 값은 9지만 0으로 예측되는 test data의 index를 출력하였다.
+- 위와 같이 7개의 test data가 Random forest model에 의해 잘못 분류되었다.
+
+```{r}
+# 잘못 분류된 이미지 출력_1
+print_image(2381)
+```
+
+
+```{r}
+# 잘못 분류된 이미지 출력_2
+print_image(2649)
+```
+
+
+```{r}
+# 잘못 분류된 이미지 출력_3
+print_image(3724)
+```
+
+- 첫 번째 이미지처럼 0과 9가 구별이 어려운 경우도 있지만, 두 번째와 세 번째 이미지는 육안으로 쉽게 9로 구별된다. 
+
