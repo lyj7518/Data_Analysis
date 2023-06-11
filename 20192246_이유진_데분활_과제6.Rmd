@@ -1,0 +1,420 @@
+---
+title: "Assignment6"
+author: "20192246 이유진"
+date: "2023-06-06"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 10
+    highlight: pygments
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 문제1
+___
+**데이터 특성 분석**
+
+```{r message=FALSE}
+# 필요 라이브러리 불러오기
+library(wordcloud)
+library(tm)
+library(slam)
+library(SnowballC)
+library(rsample)
+library(caret)
+library(vip)
+library(glmnet)
+library(ISLR)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+```{r}
+# 데이터 불러오기
+data <- read.csv("C:/Users/이유진/Downloads/imdb.csv")
+```
+
+```{r}
+# 타겟 변수 factor형으로 변환
+data$sentiment <- factor(data$sentiment)
+```
+
+```{r}
+# 타겟 변수의 분포 확인
+table(data$sentiment)
+```
+
+- 다음과 같이 타겟 변수의 분포를 확인한 결과, 4972개의 부정적 리뷰와 5028개의 긍정적 리뷰가 포함된 것을 확인할 수 있다.
+
+```{r}
+# positive/negative 분리
+positive <- subset(data, sentiment == "positive")
+negative <- subset(data, sentiment == "negative")
+
+# word cloud 생성_positive
+wordcloud(positive$review, max.words = 50, colors = brewer.pal(8, "Dark2"))
+```
+
+- Word cloud를 활용하여 긍정적 리뷰에 빈번하게 등장하는 단어를 시각화하였다.
+- 영화 리뷰에 대한 데이터이므로 movie, film, story와 같은 영화와 관련된 단어들이 빈번하게 출현한 것을 확인할 수 있다. 
+- good, great과 같이 긍정적인 의미를 내포하는 단어가 포함되었다. 하지만 the, can, will 등과 같이 의미를 파악하기 어려운 관사들도 포함된 것을 확인할 수 있다.
+
+
+```{r}
+# word cloud 생성_negative
+wordcloud(negative$review, max.words = 50, colors = brewer.pal(8, "Dark2"))
+```
+
+- Word cloud를 활용하여 부정적 리뷰에 빈번하게 등장하는 단어를 시각화하였다.
+- 긍적적 리뷰의 Word cloud와 비슷한 단어들이 비번하게 출현한 것을 확인할 수 있다.
+
+
+## 문제2
+___
+**preprocessing 수행**
+
+### 2.A
+```{r}
+# preprocessing 단계를 순서대로 수행
+corpus <- VCorpus(VectorSource(data$review)) # corpus 생성
+corpus_clean <- tm_map(corpus, content_transformer(tolower)) # 대소문자 통합
+corpus_clean <- tm_map(corpus_clean, removeNumbers) # 숫자 제거
+corpus_clean <- tm_map(corpus_clean, removeWords, stopwords()) # 불용어 제거
+corpus_clean <- tm_map(corpus_clean, removePunctuation) # 문장부호 제거
+corpus_clean <- tm_map(corpus_clean, stemDocument) # 어간 추출
+corpus_clean <- tm_map(corpus_clean, stripWhitespace) # 공백 제거
+```
+
+- 다음과 같이 리뷰 텍스트를 대상으로 corpus를 생성하고 bag-of-words 기법을 적용하기 위해 순차적으로 preprocessing을 진행하였다.
+
+### 2.B
+```{r}
+# 원 텍스트와 전처리 후 텍스트 비교
+corpus[[15]]$content
+corpus_clean[[15]]$content
+```
+
+- 다음과 같이 15번째 리뷰 데이터의 원 텍스트와 전처리 후 텍스트를 비교하였다.
+- 텍스트가 모두 소문자로 통합되었으며 숫자, 문장부호, 관사와 같은 불용어가 제거되었다. 또한 동일한 어간을 갖는 단어들의 어미가 제거된 것을 확인할 수 있다.
+
+
+## 문제3
+___
+**DTM과 TF-IDF matrix 생성**
+
+```{r}
+# DTM 생성
+dtm <- DocumentTermMatrix(corpus_clean)
+dtm
+inspect(dtm[1:10, 1:10])
+```
+
+- 다음과 같이 텍스트에 속한 단어의 출현 빈도를 수치화하기 위해 document-term matrix를 생성하였다.
+- DTM은 10000개의 document와 48717개의 term으로 구성되었고, 예시와 같이 big, director 등과 같은 단어로 구성되어 있는 것을 확인할 수 있다.
+- 해당 DTM의 Sparsity는 100%로 대부분의 원소가 0으로 이루어졌음을 알 수 있다.
+
+```{r}
+# TF-IDF matrix 생성
+tfidf <- weightTfIdf(dtm)
+tfidf
+inspect(tfidf[1:5,])
+```
+
+- document에서 term이 가지는 중요도를 고려하기 위해 TF-IDF 값을 다음과 같이 계산하였다.
+
+```{r}
+# 전체 document 중 0.5% 미만의 document에서 발생하는 단어 제외
+dtm2 <- removeSparseTerms(dtm, 0.995)
+dtm2
+```
+
+```{r}
+# 전체 document 중 0.5% 미만의 document에서 발생하는 단어 제외
+tfidf2 <- removeSparseTerms(tfidf, 0.995)
+tfidf2
+```
+
+- sparse matrix의 문제점을 해결하기 위해 다음과 같이 발생 빈도가 매우 적은 단어들을 DTM에서 제외하였다.
+- DTM에 포함된 term의 개수가 document의 4배가 넘는 높은 수라는 점을 고려하여 전체 document 중 0.5% 미만의 document에서 발생하는 단어를 제외하였다.
+- 그 결과, **48717개에서 2523개로 단어의 수가 감소**한 것을 확인할 수 있다.
+
+
+## 문제4
+___
+**리뷰텍스트의 positive/negative 여부를 판별하기 위한 predictive model 생성**
+
+### 4.A
+```{r}
+# 전처리가 끝난 DTM을 데이터프레임으로 변환
+dtm3 <- data.frame(as.matrix(dtm2))
+
+# target 변수 추가
+dtm3$sentiment <- data$sentiment
+```
+
+```{r}
+# 데이터셋 분할
+set.seed(42)
+split <- initial_split(dtm3, prop = 0.3, strata = "sentiment") # train / test 분할
+dtm_train <- training(split)
+dtm_test <- testing(split)
+
+split <- initial_split(dtm_train, prop = 0.8, strata = "sentiment") # train / val 분할
+dtm_train <- training(split)
+dtm_val <- testing(split)
+
+print(nrow(dtm_train))
+print(nrow(dtm_val))
+print(nrow(dtm_test))
+```
+
+- 다음과 같이 train / validation / test set을 분할하였다.
+- 총 10000개의 데이터 셋 중, 7000개를 test set으로 분할 후 나머지 3000개의 데이터를 8:2의 비율로 train / validation set으로 분할하였다.
+- 그 결과 각각 2398개, 601개, 7001개로 나누어진 것을 알 수 있다.
+
+<br>
+
+#### 1) Logistic Regression model
+```{r}
+# Logistic regression 수행
+logistic_model = glm(sentiment~., data=dtm_train, family="binomial")
+
+# validation set에 대한 성능 평가
+lr_prob <- predict(logistic_model, dtm_val, type="response")
+lr_pred <- rep("negative", nrow(dtm_val))
+lr_pred[lr_prob > 0.5] <- "positive"
+confusionMatrix(factor(lr_pred), dtm_val$sentiment, positive = "positive")
+```
+
+- 아무런 tunning을 진행하지 않은 기본 Logistic regression model을 통해 train set을 학습시킨 후, validation set에 대해 성능 평가를 진행하였다.
+- 그 결과 약 **50.08%의 accuracy**를 보였다. 즉, 해당 리뷰에 대해 48% 확률로 positive와 negative를 분류함을 의미한다.
+
+```{r}
+# feature importance 시각화
+vip(logistic_model)
+```
+
+- 다음은 target 변수에 미치는 영향도가 가장 높은 10개의 feature를 시각화한 결과이다. 
+
+```{r}
+# feature importance 상위 10개의 feature를 사용한 Logistic regression model
+logistic_model2 = glm(sentiment~ varieti + christma + filmmak + gentl + naiv + owe + cartoon + castl + amateurish + destruct, data=dtm_train, family="binomial")
+
+# validation set에 대한 성능 평가
+lr_prob2 <- predict(logistic_model2, dtm_val, type="response")
+lr_pred2 <- rep("negative", nrow(dtm_val))
+lr_pred2[lr_prob2 > 0.5] <- "positive"
+confusionMatrix(factor(lr_pred2), dtm_val$sentiment, positive = "positive")
+```
+
+- 시각화를 통해 파악한 Target 변수에 미치는 영향도가 높은 상위 10개의 변수들로 logistic regression model을 구성하였다.
+- 그 결과 약 **53.41%의 accuracy**로 기본 Logistic Regression model보다 약간 높은 성능을 보이나 여전히 낮은 분류 성능을 가지는 것을 알 수 있다.
+
+<br>
+
+#### 2) Lasso Regression model
+
+```{r}
+# train set을 대상으로 Lasso regression 적용
+trainX = model.matrix(sentiment~., data = dtm_train)[,-1]
+trainY = dtm_train$sentiment
+cv_lasso = cv.glmnet(x = trainX, y = trainY, alpha = 1, family = "binomial", type.measure = "class", nfolds = 10)
+plot(cv_lasso)
+```
+
+```{r}
+# best lambda 설정
+best_lambda <- cv_lasso$lambda[which.min(cv_lasso$cvm)]
+best_lambda
+```
+
+- 다음과 같이 misclassification error가 가장 낮을 때의 lambda 값을 계산한 결과 0.004309115가 도출되었다.
+
+```{r}
+# 선택된 모델에 대해 validation set confusion matrix 계산 
+prob_lasso <- predict(cv_lasso, newx = model.matrix(sentiment~., data=dtm_val)[,-1], s = best_lambda, type = "response")
+pred_lasso <- rep("negative", nrow(dtm_val))
+pred_lasso[prob_lasso > 0.5] <- "positive"
+confusionMatrix(factor(pred_lasso, levels = c("negative", "positive")), dtm_val$sentiment, positive = "positive")
+```
+
+```{r}
+# 모델에 포함된 변수의 개수 출력
+num_variables <- sum(coef(cv_lasso, s = best_lambda) != 0)
+num_variables
+```
+
+- best lambda 값에 대한 Lasso Regression model의 validation set confusion matrix을 계산하였다.
+- 그 결과, 630개의 변수가 모델에 포함되었으며 **82.36%의 accuracy**로 앞선 logistic regression model보다 우수한 성능을 보임을 알 수 있다.
+
+<br>
+
+#### 3) SVM model
+
+```{r}
+set.seed(42)
+# RBF kernel SVM 
+svmfit <- svm(sentiment~., data=dtm_train, kernel="radial", gamma=1, cost=10)
+
+# validation set confusion matrix 계산
+ypred <- predict(svmfit, newdata=dtm_val)
+confusionMatrix(ypred, as.factor(dtm_val$sentiment))
+```
+- tune 함수를 사용하여 파라미터에 대한 tuning을 진행 시 지속적으로 오류가 발생하여 불가피하게 tuning을 진행하지 않고 임의의 파라미터를 세팅하여 RBF kernel SVM을 수행하였다.
+- 그 결과,  **50.42%의 accuracy**로 예측 성능이 평가되었다.
+
+<br>
+
+#### 4) Decision Tree
+
+```{r}
+set.seed(42)
+
+# cp=0인 classification tree 생성
+ct <- rpart(sentiment~., data=dtm_train, method="class", control=list(cp=0))
+
+# tree 시각화
+rpart.plot(ct)
+printcp(ct)
+```
+
+- 다음과 같이 cp=0인 tree를 구성한 결과 굉장히 복잡한 구조의 tree 모델이 형성되었다.
+
+```{r}
+# cv error가 가장 낮을 때의 cp값 저장
+best_cp <- ct$cptable[which.min(ct$cptable[, "xerror"]), "CP"]
+print(best_cp)
+
+# best cp 값일 때의 pruned tree 생성
+best_ct <- prune(ct, cp = best_cp)
+
+# validation set에 대한 오차 계산
+pred_class <- predict(best_ct, newdata = dtm_val, type = "class")
+confusionMatrix(factor(pred_class), dtm_val$sentiment, positive="positive")
+```
+
+- cv error가 가장 낮을 때의 cp 값은 0.004194631로 도출되었다.
+- 앞서 구한 best cp값을 이용하여 구성한 tree model의 validation set confusion matrix를 계산한 결과, **68.05%의 accuracy**를 가짐을 확인할 수 있다.
+
+<br>
+
+#### 5) Random Forest
+
+```{r}
+# Random Forest model 구성
+set.seed(42)
+rf <- randomForest(sentiment~., data = dtm_train)
+
+# validation set에 대한 예측 수행
+pred_class2 <- predict(rf, newdata = dtm_val, type = "class")
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_class2), dtm_val$sentiment)
+```
+
+```{r}
+# feature importance 시각화
+vip(rf)
+```
+
+- Target 변수에 미치는 영향도가 높은 상위 10개의 변수들을 시각화 한 결과, bad, worst, great, excel 등과 같이 핵심적인 단어들이 큰 영향을 끼친다는 것을 확인할 수 있다.
+- Random forest model의 validation set에 대한 예측을 수행한 결과, **accuracy는 80.87%이다.**
+
+<br>
+
+#### **최종 성능 비교**
+- 다음과 같은 모델을 사용하여 얻은 validation set의 accuracy 성능을 비교해보자.
+  - 1) Logistic Regression model : 50.08%
+  - 2) (feature 수를 10개로 조정한) Logistic Regression model : 53.41%
+  - 3) **Lasso Regression model : 82.36%**
+  - 3) SVM : 50.42%
+  - 4) Decision Tree : 68.05%
+  - 5) Random Forest : 80.87%
+- **따라서 validation set의 accuracy 성능이 가장 높은 모델은 Lasso Regression model이다.**
+
+<br>
+
+#### TF-IDF를 이용한 Lasso Regression model
+```{r}
+# TF-IDF를 데이터프레임으로 변환
+tfidf3 <- data.frame(as.matrix(tfidf2))
+
+# target 변수 추가
+tfidf3$sentiment <- data$sentiment
+```
+
+```{r}
+# 데이터셋 분할
+set.seed(42)
+split <- initial_split(tfidf3, prop = 0.3, strata = "sentiment") # train / test 분할
+tfidf_train <- training(split)
+tfidf_test <- testing(split)
+
+split <- initial_split(tfidf_train, prop = 0.8, strata = "sentiment") # train / val 분할
+tfidf_train <- training(split)
+tfidf_val <- testing(split)
+```
+
+```{r}
+# TF-IDF를 이용한 Lasso Regression model 구성
+set.seed(42)
+trainX = model.matrix(sentiment~., data = tfidf_train)[,-1]
+trainY = tfidf_train$sentiment
+cv_lasso2 = cv.glmnet(x = trainX, y = trainY, alpha = 1, family = "binomial", type.measure = "class", nfolds = 10)
+
+# best lambda 설정
+best_lambda2 <- cv_lasso2$lambda[which.min(cv_lasso2$cvm)]
+best_lambda2
+```
+
+
+```{r}
+# validation set에 대한 예측 수행
+prob_lasso2 <- predict(cv_lasso2, newx = model.matrix(sentiment~., data=tfidf_val)[,-1], s = best_lambda2, type = "response")
+pred_lasso2 <- rep("negative", nrow(tfidf_val))
+pred_lasso2[prob_lasso2 > 0.5] <- "positive"
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_lasso2, levels = c("negative", "positive")), tfidf_val$sentiment, positive = "positive")
+```
+
+- 앞선 과정에서 best model로 선정된 Lasso Regression model에 TF-IDF를 활용하여 모델을 구성하였다.
+- 그 결과, **accuracy는 83.69%**으로 가장 높은 예측 성능을 보이는 것으로 나타났다.
+
+
+### 4.B
+**Best model의 accuracy 결과 비교**
+```{r}
+# training set의 accuracy 
+prob_lasso_train <- predict(cv_lasso2, newx = model.matrix(sentiment~., data=tfidf_train)[,-1], s = best_lambda2, type = "response")
+pred_lasso_train <- rep("negative", nrow(tfidf_train))
+pred_lasso_train[prob_lasso_train > 0.5] <- "positive"
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_lasso_train, levels = c("negative", "positive")), tfidf_train$sentiment, positive = "positive")
+```
+
+```{r}
+# test set의 accuracy 
+prob_lasso_test <- predict(cv_lasso2, newx = model.matrix(sentiment~., data=tfidf_test)[,-1], s = best_lambda2, type = "response")
+pred_lasso_test <- rep("negative", nrow(tfidf_test))
+pred_lasso_test[prob_lasso_test > 0.5] <- "positive"
+
+# confusion matrix 계산
+confusionMatrix(factor(pred_lasso_test, levels = c("negative", "positive")), tfidf_test$sentiment, positive = "positive")
+```
+
+- 모든 결과를 종합하여 최종적으로 선택한 모델은 **TF-IDF를 이용한 Lasso Regression model**이다.
+- **training set의 accuracy는 95.91%**로, 학습한 대부분의 데이터에 대해서 올바른 분류를 하는 것으로 나타났다.
+- **test set의 accuracy는 82.75%**로 검증 정확도보다 약간 낮은 성능을 보이는 것을 알 수 있다.
+
